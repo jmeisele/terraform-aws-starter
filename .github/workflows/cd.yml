@@ -1,0 +1,60 @@
+name: Continuous Deployment
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy-infra:
+    name: Deploy Infrastructure w/ Terraform
+    runs-on: ubuntu-20.04
+    permissions:
+      contents: read
+      id-token: write
+      packages: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Generate .auto.tfvars
+        run: |
+          echo "access_key=\"${{ secrets.AWS_ACCESS_KEY_ID }}\"" >> ./.auto.tfvars
+          echo "secret_key=\"${{ secrets.AWS_SECRET_ACCESS_KEY }}\"" >> ./.auto.tfvars
+          echo "---------------------------------------------------------"
+          cat ./.auto.tfvars
+          echo "---------------------------------------------------------"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Terrform format
+        id: fmt
+        run: terraform fmt -check
+
+      - name: Terraform Init
+        id: init
+        env:
+          TF_TOKEN: ${{ secrets.TF_API_TOKEN }}
+        run: terraform init
+
+      - name: Terraform validate
+        id: validate
+        run: terraform validate -no-color
+
+      - name: Terraform Plan
+        id: plan
+        if: github.event_name == 'pull_request'
+        run: terraform plan -no-color -input=false
+        continue-on-error: true
+
+      - name: Terraform Plan Status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve -input=false
